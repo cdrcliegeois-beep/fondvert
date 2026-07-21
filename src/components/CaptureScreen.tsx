@@ -2,8 +2,8 @@ import { useRef, useState } from 'react'
 import { cutout } from '../lib/backgroundRemoval'
 
 interface Props {
-  /** Appelé avec l'URL (blob) du sujet détouré, prêt à être ajouté au collage */
-  onDone: (cutoutUrl: string) => void
+  /** Appelé avec la photo d'origine et le sujet détouré (URLs blob) */
+  onDone: (originalUrl: string, cutoutUrl: string) => void
   /** Affiché seulement s'il y a déjà un collage en cours */
   onCancel?: () => void
 }
@@ -28,7 +28,7 @@ export default function CaptureScreen({ onDone, onCancel }: Props) {
     try {
       const blob = await cutout(file, setProgress)
       const cutoutUrl = URL.createObjectURL(blob)
-      onDone(cutoutUrl)
+      onDone(url, cutoutUrl)
     } catch (e) {
       console.error(e)
       setError(

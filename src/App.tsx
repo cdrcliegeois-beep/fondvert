@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import CaptureScreen from './components/CaptureScreen'
+import RetouchScreen from './components/RetouchScreen'
 import Editor from './components/Editor'
 import type { Doc, ImageLayer } from './types'
 import { FORMATS } from './types'
@@ -10,11 +11,12 @@ const initialDoc: Doc = {
   layers: [],
 }
 
-type View = 'capture' | 'editor'
+type View = 'capture' | 'retouch' | 'editor'
 
 export default function App() {
   const [doc, setDoc] = useState<Doc>(initialDoc)
   const [view, setView] = useState<View>('capture')
+  const [pending, setPending] = useState<{ originalUrl: string; cutoutUrl: string } | null>(null)
 
   /** Ajoute le sujet détouré comme nouveau calque, centré et à taille raisonnable */
   function addSubject(cutoutUrl: string) {
@@ -39,6 +41,7 @@ export default function App() {
         shadow: false,
       }
       setDoc((d) => ({ ...d, layers: [...d.layers, layer] }))
+      setPending(null)
       setView('editor')
     }
     img.src = cutoutUrl
@@ -47,8 +50,26 @@ export default function App() {
   if (view === 'capture') {
     return (
       <CaptureScreen
-        onDone={addSubject}
+        onDone={(originalUrl, cutoutUrl) => {
+          setPending({ originalUrl, cutoutUrl })
+          setView('retouch')
+        }}
         onCancel={doc.layers.length > 0 ? () => setView('editor') : undefined}
+      />
+    )
+  }
+
+  if (view === 'retouch' && pending) {
+    return (
+      <RetouchScreen
+        originalUrl={pending.originalUrl}
+        cutoutUrl={pending.cutoutUrl}
+        onValidate={(finalUrl) => addSubject(finalUrl)}
+        onSkip={(cutoutUrl) => addSubject(cutoutUrl)}
+        onCancel={() => {
+          setPending(null)
+          setView(doc.layers.length > 0 ? 'editor' : 'capture')
+        }}
       />
     )
   }
