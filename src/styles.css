@@ -154,6 +154,10 @@ body {
 .btn:active {
   transform: scale(0.97);
 }
+.btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .btn.primary {
   background: var(--primary);
   color: #04231a;
@@ -223,6 +227,7 @@ body {
 }
 
 .canvas-wrap {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -230,6 +235,46 @@ body {
   justify-content: center;
   padding: 12px;
   background: repeating-conic-gradient(#0b1220 0% 25%, #0f172a 0% 50%) 50% / 28px 28px;
+  touch-action: none;
+  overflow: hidden;
+}
+
+/* ---------- Contrôles de zoom (éditeur + retouche) ---------- */
+.zoom-controls {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 5px 8px;
+  z-index: 5;
+  backdrop-filter: blur(4px);
+}
+.zoom-controls button {
+  border: none;
+  background: var(--panel-2);
+  color: var(--text);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+.zoom-controls button:active {
+  transform: scale(0.94);
+}
+.zoom-controls span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  min-width: 44px;
+  text-align: center;
 }
 .stage {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -348,6 +393,7 @@ body {
   background: var(--bg);
 }
 .retouch-canvas-wrap {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -355,6 +401,17 @@ body {
   justify-content: center;
   padding: 12px;
   background: repeating-conic-gradient(#0b1220 0% 25%, #0f172a 0% 50%) 50% / 28px 28px;
+  overflow: hidden;
+  touch-action: none;
+}
+.brush-cursor {
+  position: fixed;
+  display: none;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  z-index: 60;
 }
 .retouch-canvas {
   max-width: 100%;
@@ -379,10 +436,11 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border-radius: var(--radius);
-  padding: 12px;
-  font-size: 15px;
+  padding: 10px 4px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 .tool-btn small {
   font-weight: 400;

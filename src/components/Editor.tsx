@@ -14,6 +14,8 @@ interface Props {
 
 type Tab = 'element' | 'background'
 
+const MAX_ZOOM = 6
+
 export default function Editor({ doc, setDoc, onAddSubject }: Props) {
   const { format, layers } = doc
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -24,6 +26,17 @@ export default function Editor({ doc, setDoc, onAddSubject }: Props) {
   const trRef = useRef<Konva.Transformer>(null)
   const bgFileRef = useRef<HTMLInputElement>(null)
   const [scale, setScale] = useState(0.3)
+
+  // zoom utilisateur (1 = ajusté à l'écran) + déplacement de la vue
+  const [zoom, setZoom] = useState(1)
+  const [panPos, setPanPos] = useState({ x: 0, y: 0 })
+  const scaleRef = useRef(scale)
+  const zoomRef = useRef(zoom)
+  const panRef = useRef(panPos)
+  scaleRef.current = scale
+  zoomRef.current = zoom
+  panRef.current = panPos
+  const lastPinch = useRef<{ dist: number; mid: { x: number; y: number } } | null>(null)
 
   // Sélectionne automatiquement le dernier calque ajouté
   const prevCount = useRef(layers.length)
@@ -62,7 +75,91 @@ export default function Editor({ doc, setDoc, onAddSubject }: Props) {
     tr.getLayer()?.batchDraw()
   })
 
+  // molette souris = zoom (desktop)
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, { x: e.clientX, y: e.clientY })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const selected = layers.find((l) => l.id === selectedId) ?? null
+
+  // ---------- zoom / déplacement de la vue ----------
+
+  function setZoomPan(z: number, p: { x: number; y: number }) {
+    if (z <= 1) {
+      z = 1
+      p = { x: 0, y: 0 }
+    }
+    setZoom(z)
+    setPanPos(p)
+  }
+
+  /** zoom multiplicatif, centré sur un point écran (par défaut : centre du canvas) */
+  function zoomAt(factor: number, screen?: { x: number; y: number }) {
+    const stage = stageRef.current
+    if (!stage) return
+    const box = stage.container().getBoundingClientRect()
+    const p = screen
+      ? { x: screen.x - box.left, y: screen.y - box.top }
+      : { x: box.width / 2, y: box.height / 2 }
+    const oldZ = zoomRef.current
+    const s = scaleRef.current
+    const newZ = Math.min(MAX_ZOOM, Math.max(1, oldZ * factor))
+    const absOld = s * oldZ
+    const absNew = s * newZ
+    const pt = {
+      x: (p.x - panRef.current.x) / absOld,
+      y: (p.y - panRef.current.y) / absOld,
+    }
+    setZoomPan(newZ, { x: p.x - pt.x * absNew, y: p.y - pt.y * absNew })
+  }
+
+  // pince à deux doigts sur le canvas (mobile)
+  function handleTouchMove(e: Konva.KonvaEventObject<TouchEvent>) {
+    const touches = e.evt.touches
+    if (touches.length !== 2) return
+    e.evt.preventDefault()
+    const stage = stageRef.current
+    if (!stage) return
+    if (stage.isDragging()) stage.stopDrag()
+    const box = stage.container().getBoundingClientRect()
+    const p1 = { x: touches[0].clientX - box.left, y: touches[0].clientY - box.top }
+    const p2 = { x: touches[1].clientX - box.left, y: touches[1].clientY - box.top }
+    const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
+    const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y)
+    const last = lastPinch.current
+    if (!last) {
+      lastPinch.current = { dist, mid }
+      return
+    }
+    const s = scaleRef.current
+    const oldZ = zoomRef.current
+    const absOld = s * oldZ
+    const newZ = Math.min(MAX_ZOOM, Math.max(1, oldZ * (dist / last.dist)))
+    const absNew = s * newZ
+    const pt = {
+      x: (mid.x - panRef.current.x) / absOld,
+      y: (mid.y - panRef.current.y) / absOld,
+    }
+    setZoomPan(newZ, {
+      x: mid.x - pt.x * absNew + (mid.x - last.mid.x),
+      y: mid.y - pt.y * absNew + (mid.y - last.mid.y),
+    })
+    lastPinch.current = { dist, mid }
+  }
+
+  function handleTouchEnd() {
+    lastPinch.current = null
+  }
+
+  // ---------- calques ----------
 
   function updateLayer(id: string, patch: Partial<AnyLayer>) {
     setDoc((d) => ({
@@ -97,6 +194,24 @@ export default function Editor({ doc, setDoc, onAddSubject }: Props) {
     })
   }
 
+  /** retourne l'image du calque horizontalement (effet miroir, cuit dans la source) */
+  function flipLayer(l: ImageLayer) {
+    const img = new window.Image()
+    img.onload = () => {
+      const c = document.createElement('canvas')
+      c.width = img.naturalWidth
+      c.height = img.naturalHeight
+      const ctx = c.getContext('2d')!
+      ctx.translate(c.width, 0)
+      ctx.scale(-1, 1)
+      ctx.drawImage(img, 0, 0)
+      c.toBlob((b) => {
+        if (b) updateLayer(l.id, { src: URL.createObjectURL(b) })
+      }, 'image/png')
+    }
+    img.src = l.src
+  }
+
   function addText() {
     const t: TextLayer = {
       id: crypto.randomUUID(),
@@ -128,20 +243,30 @@ export default function Editor({ doc, setDoc, onAddSubject }: Props) {
 
   function exportImage() {
     setSelectedId(null)
-    requestAnimationFrame(() => {
-      const stage = stageRef.current
-      if (!stage) return
-      const pixelRatio = (format.w * 2) / stage.width()
-      const uri = stage.toDataURL({ pixelRatio, mimeType: 'image/png' })
-      const a = document.createElement('a')
-      a.href = uri
-      a.download = 'fondvert.png'
-      a.click()
-    })
+    setZoomPan(1, { x: 0, y: 0 }) // revient à la vue complète avant capture
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const stage = stageRef.current
+        if (!stage) return
+        const pixelRatio = (format.w * 2) / stage.width()
+        const uri = stage.toDataURL({ pixelRatio, mimeType: 'image/png' })
+        const a = document.createElement('a')
+        a.href = uri
+        a.download = 'fondvert.png'
+        a.click()
+      }),
+    )
   }
 
   function deselectOnEmpty(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
     if (e.target === e.target.getStage()) setSelectedId(null)
+  }
+
+  function onStageDragEnd(e: Konva.KonvaEventObject<DragEvent>) {
+    const stage = stageRef.current
+    if (stage && e.target === stage) {
+      setPanPos({ x: stage.x(), y: stage.y() })
+    }
   }
 
   return (
@@ -169,8 +294,14 @@ export default function Editor({ doc, setDoc, onAddSubject }: Props) {
           ref={stageRef}
           width={format.w * scale}
           height={format.h * scale}
-          scaleX={scale}
-          scaleY={scale}
+          scaleX={scale * zoom}
+          scaleY={scale * zoom}
+          x={panPos.x}
+          y={panPos.y}
+          draggable={zoom > 1}
+          onDragEnd={onStageDragEnd}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
           onMouseDown={deselectOnEmpty}
           onTouchStart={deselectOnEmpty}
           className="stage"
@@ -205,6 +336,12 @@ export default function Editor({ doc, setDoc, onAddSubject }: Props) {
             />
           </Layer>
         </Stage>
+        <div className="zoom-controls">
+          <button onClick={() => zoomAt(1 / 1.25)}>−</button>
+          <span>{Math.round(zoom * 100)} %</span>
+          <button onClick={() => zoomAt(1.25)}>+</button>
+          {zoom > 1 && <button onClick={() => setZoomPan(1, { x: 0, y: 0 })}>⤢</button>}
+        </div>
       </div>
 
       <div className="panel">
@@ -297,6 +434,11 @@ export default function Editor({ doc, setDoc, onAddSubject }: Props) {
                   <button className="btn tiny" onClick={() => reorder(selected.id, 'down')}>
                     ⬇ Reculer
                   </button>
+                  {selected.type === 'image' && (
+                    <button className="btn tiny" onClick={() => flipLayer(selected as ImageLayer)}>
+                      ↔ Miroir
+                    </button>
+                  )}
                   <button className="btn tiny" onClick={() => duplicateLayer(selected.id)}>
                     ⧉ Dupliquer
                   </button>
@@ -309,7 +451,7 @@ export default function Editor({ doc, setDoc, onAddSubject }: Props) {
               <p className="hint">
                 {layers.length === 0
                   ? 'Ajoute un sujet ou du texte pour commencer.'
-                  : 'Touche un élément sur le canvas pour le modifier.'}
+                  : 'Touche un élément pour le modifier. Pince à deux doigts pour zoomer.'}
               </p>
             )}
           </div>
