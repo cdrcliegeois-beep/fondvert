@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+_smoke*.mjs
+scratch_test.png
+npm-debug.log*
